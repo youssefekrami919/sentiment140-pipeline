@@ -1,0 +1,448 @@
+\documentclass[12pt, a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath, amssymb, amsfonts}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
+\usepackage{hyperref}
+\usepackage{microtype}
+\usepackage{parskip}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=black,
+    urlcolor=blue,
+    citecolor=blue
+}
+
+\begin{document}
+
+% -------------------------------------------------------------
+% COVER PAGE (PAGE 1)
+% -------------------------------------------------------------
+\begin{titlepage}
+    \centering
+    \vspace*{3cm}
+    
+    {\Huge \textbf{Sentiment140: End-to-End Sentiment Analysis \& Text Preprocessing Pipeline}\par}
+    
+    \vspace{2cm}
+    
+    {\Large \textbf{Project Contributors}\par}
+    \vspace{1cm}
+    
+    \begin{table}[h!]
+        \centering
+        \renewcommand{\arraystretch}{1.5}
+        \begin{tabular}{|l|c|}
+            \hline
+            \textbf{Name} & \textbf{Phone Number} \\ \hline
+            \textbf{Youssef Ekrami Mofreh} & 01066472757 \\ \hline
+            \textbf{Dareen Ashraf Mosa} & 01554237770 \\ \hline
+        \end{tabular}
+    \end{table}
+    
+    \vfill
+\end{titlepage}
+
+\newpage
+\pagenumbering{roman}
+
+% -------------------------------------------------------------
+% TABLE OF CONTENTS
+% -------------------------------------------------------------
+\tableofcontents
+\newpage
+
+\pagenumbering{arabic}
+
+% -------------------------------------------------------------
+% SECTION 1: EXECUTIVE SUMMARY
+% -------------------------------------------------------------
+\section{Executive Summary}
+
+This report presents a scalable, production-grade Natural Language Processing (NLP) pipeline developed for binary sentiment classification on the massive \textbf{Sentiment140} corpus, comprising \textbf{1,600,000 tweets}. 
+
+Social media text presents substantial analytical challenges due to extreme lexical variance, platform-specific noise (e.g., hyperlinked media, user mentions, hashtags), informal orthography, and grammatical irregularities. To tackle these issues, a rigorous exploratory and preprocessing workflow was designed, systematically identifying, quantifying, and removing extraneous tokens while retaining the semantic core of each utterance. 
+
+A high-performance feature extraction pipeline utilizing \textbf{Term Frequency--Inverse Document Frequency (TF-IDF)} with unigram and bigram representation ($n \in \{1, 2\}$) was integrated with an optimized \textbf{Logistic Regression} classifier. Trained on \textbf{1,280,000 instances}, the model achieved a \textbf{79.45\% accuracy} on an independent holdout test set of \textbf{320,000 tweets} in a training duration of \textbf{3.63 seconds}. This demonstrates that sound, principled text preprocessing combined with convex linear classification provides an exceptionally fast, memory-efficient, and accurate baseline for large-scale text mining.
+
+% -------------------------------------------------------------
+% SECTION 2: PROBLEM FORMULATION
+% -------------------------------------------------------------
+\section{Problem Formulation \& Social Media Dynamics}
+
+Automated sentiment analysis aims to determine the underlying affective polarity---positive, negative, or neutral---expressed in natural language text. In digital ecosystems, platforms such as Twitter (now X) serve as public channels for real-time customer feedback, public discourse, political reactions, and brand evaluations.
+
+However, microblog texts diverge sharply from conventional corpora (such as news dispatches or literature):
+\begin{enumerate}
+    \item \textbf{High Syntactic and Lexical Noise:} Microblog posts contain high frequencies of platform-specific artifacts including mentions (\texttt{@username}), shortened uniform resource locators (URLs), hashtags (\texttt{\#topic}), and arbitrary punctuation strings.
+    \item \textbf{Brevity and Informal Grammar:} Because users write colloquially, sentences often omit formal sentence boundaries, contain non-standard abbreviations, and rely on fragmented syntax.
+    \item \textbf{Polarity-Reversing Constructs:} Negative sentiments are frequently expressed through explicit negation terms (\texttt{not}, \texttt{no}, \texttt{never}, \texttt{cannot}). Standard, naive text-cleaning techniques that blindly discard stopwords often eradicate these critical particles, inadvertently inverting the semantic meaning of the sentence.
+\end{enumerate}
+
+The objective of this project is to construct an end-to-end, reproducible NLP pipeline that sanitizes noisy microblog text, maps high-dimensional linguistic tokens into discriminative vector representations, and classifies sentiment polarity with high fidelity and ultra-low inference latency.
+
+% -------------------------------------------------------------
+% SECTION 3: DATASET ANATOMY
+% -------------------------------------------------------------
+\section{Dataset Anatomy \& The "Sentiment140" Nomenclature}
+
+\subsection{Origin of the Nomenclature}
+A common misconception among practitioners is that the title \textbf{"Sentiment140"} indicates a corpus containing 140 or 140,000 samples. In reality, the name directly honors \textbf{Twitter's historical 140-character constraint} per tweet, which dictated microblogging conventions during the late 2000s. Despite the title, this pipeline processes the complete, full-scale dataset of \textbf{1,600,000 individual records}.
+
+\subsection{Data Generation \& Distant Supervision}
+The corpus was annotated utilizing \textbf{distant supervision} (weak supervision). Tweets were collected using the Twitter Search API by querying positive emoticons (e.g., \texttt{:=)}, \texttt{:-)}, \texttt{=)}) and negative emoticons (e.g., \texttt{:(}, \texttt{:-(}, \texttt{:=()}). Once the binary class labels were assigned based on these query markers, all emoticons were stripped from the text bodies. Consequently, models trained on this dataset cannot rely on visual emoticons and are forced to learn sentiment from contextual vocabulary, sentence structures, and lexical qualifiers.
+
+\subsection{Schema Specifications}
+The raw CSV file does not contain a header line and is encoded in \texttt{ISO-8859-1} (\texttt{latin-1}). It comprises 6 distinct columns:
+
+\begin{table}[h!]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|c|l|l|p{7.5cm}|}
+        \hline
+        \textbf{Index} & \textbf{Identifier} & \textbf{Data Type} & \textbf{Description} \\ \hline
+        \textbf{0} & \texttt{target} & Integer & Polarity label: \texttt{0} = Negative, \texttt{4} = Positive \\ \hline
+        \textbf{1} & \texttt{ids} & Integer & Unique tweet identification number \\ \hline
+        \textbf{2} & \texttt{date} & String & Timestamp of publication (e.g., \texttt{Mon Apr 06 22:19:45 PDT 2009}) \\ \hline
+        \textbf{3} & \texttt{flag} & String & Query flag used during extraction (\texttt{NO\_QUERY}) \\ \hline
+        \textbf{4} & \texttt{user} & String & Twitter author username \\ \hline
+        \textbf{5} & \texttt{text} & String & Raw text content of the tweet \\ \hline
+    \end{tabular}
+    \caption{Attribute specifications of the raw Sentiment140 corpus.}
+\end{table}
+
+For binary modeling, the \texttt{target} column was mapped from the original $\{0, 4\}$ labels into a standard binary indicator $\{0, 1\}$:
+\begin{equation}
+y_i \in \{0, 1\} \quad \text{such that} \quad y_i = \begin{cases} 0 & \text{if Negative} \\ 1 & \text{if Positive} \end{cases}
+\end{equation}
+
+% -------------------------------------------------------------
+% SECTION 4: EDA & NOISE QUANTIFICATION
+% -------------------------------------------------------------
+\section{Exploratory Data Analysis \& Empirical Noise Quantification}
+
+Before applying text sanitization routines, exploratory verification was conducted on the entire 1.6-million-row dataset to detect missing values, assess duplicate entries, and verify class distribution.
+
+\subsection{Integrity \& Balance Verifications}
+\begin{itemize}
+    \item \textbf{Total Record Count:} $N = 1,600,000$ rows.
+    \item \textbf{Missing Value Check (\texttt{isnull().sum()}):} $0$ null values detected across all 6 columns.
+    \item \textbf{Duplicate Check (\texttt{duplicated().sum()}):} $0$ duplicate instances.
+    \item \textbf{Class Distribution:}
+    \begin{itemize}
+        \item Negative class ($y = 0$): \textbf{800,000} records (50.0\%)
+        \item Positive class ($y = 1$): \textbf{800,000} records (50.0\%)
+    \end{itemize}
+\end{itemize}
+
+The dataset exhibits \textbf{perfect class balance}, eliminating the need for synthetic oversampling or class-weighted loss penalties.
+
+\subsection{Empirical Noise Quantification}
+To assess the extent of social media noise before cleaning, regular expressions were executed across the entire textual column \texttt{df['text']}. Each filter quantified the exact number of rows containing a specific noise category:
+
+\begin{table}[h!]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|c|l|l|r|c|}
+        \hline
+        \textbf{Rank} & \textbf{Noise Category} & \textbf{Detection Pattern} & \textbf{Affected Tweets} & \textbf{Corpus Prevalence (\%)} \\ \hline
+        \textbf{1} & Punctuation \& Symbols & \texttt{[\textasciicircum\textbackslash w\textbackslash s]} & \textbf{1,449,659} & \textbf{90.60\%} \\ \hline
+        \textbf{2} & User Mentions & \texttt{@\textbackslash w+} & \textbf{738,491} & \textbf{46.16\%} \\ \hline
+        \textbf{3} & Consecutive Spaces & \texttt{\textbackslash s\{2,\}} & \textbf{564,944} & \textbf{35.31\%} \\ \hline
+        \textbf{4} & Numeric Digits & \texttt{\textbackslash d+} & \textbf{366,487} & \textbf{22.91\%} \\ \hline
+        \textbf{5} & Hyperlinks \& URLs & \texttt{https?://\textbackslash S+\textbar www\textbackslash.\textbackslash S+} & \textbf{75,693} & \textbf{4.73\%} \\ \hline
+        \textbf{6} & Hashtags & \texttt{\#\textbackslash w+} & \textbf{35,842} & \textbf{2.24\%} \\ \hline
+    \end{tabular}
+    \caption{Empirical noise audit across 1,600,000 raw tweets.}
+\end{table}
+
+These empirical metrics demonstrate that over \textbf{90\%} of tweets contain non-alphanumeric punctuation and nearly \textbf{half} contain user mentions, highlighting the necessity of systematic preprocessing before feature extraction.
+
+% -------------------------------------------------------------
+% SECTION 5: TEXT PREPROCESSING PIPELINE
+% -------------------------------------------------------------
+\section{End-to-End Text Preprocessing Pipeline}
+
+The preprocessing workflow was designed modularly, applying deterministic transformations to convert noisy raw text into clean lexical tokens.
+
+\subsection{Regular Expression Sanitization}
+The sanitization routine executes the following sequential operations:
+\begin{enumerate}
+    \item \textbf{Case Folding:} Converts characters to lowercase to prevent vocabulary fragmentation (e.g., \texttt{GREAT}, \texttt{Great}, and \texttt{great} map to a single token).
+    \item \textbf{URL Removal:} Strips \texttt{http://}, \texttt{https://}, and \texttt{www.} patterns. URLs introduce arbitrary web paths that bloat vocabulary without contributing affective value.
+    \item \textbf{User Mention Stripping:} Matches and deletes \texttt{@username} handles, removing author-specific identifiers that do not generalize.
+    \item \textbf{Hashtag Normalization:} Preserves the semantic root word while removing the \texttt{\#} symbol (e.g., \texttt{\#frustrated} becomes \texttt{frustrated}).
+    \item \textbf{Punctuation \& Symbol Stripping:} Eliminates non-word and non-space characters (\texttt{[\textasciicircum\textbackslash w\textbackslash s]}).
+    \item \textbf{Digit Deletion:} Strips standalone numbers (\texttt{\textbackslash d+}).
+    \item \textbf{Whitespace Compaction:} Collapses multiple spaces, tabs, and newlines into a single space, followed by trimming.
+\end{enumerate}
+
+\begin{table}[h!]
+    \centering
+    \small
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|c|p{7cm}|p{7cm}|c|}
+        \hline
+        \textbf{Id} & \textbf{Original Raw Tweet} & \textbf{Sanitized Tweet (\texttt{clean\_text})} & \textbf{Label} \\ \hline
+        \textbf{0} & \texttt{@switchfoot http://twitpic.com/2y1zl - Awww, that's a bummer. You shoulda got David Carr of Third Day to do it. ;D} & \texttt{awww thats a bummer you shoulda got david carr of third day to do it d} & 0 \\ \hline
+        \textbf{1} & \texttt{is upset that he can't update his Facebook by texting it... and might cry as a result School today also. Blah!} & \texttt{is upset that he cant update his facebook by texting it and might cry as a result school today also blah} & 0 \\ \hline
+        \textbf{2} & \texttt{@Kenichan I dived many times for the ball. Managed to save 50\% The rest go out of bounds} & \texttt{i dived many times for the ball managed to save the rest go out of bounds} & 0 \\ \hline
+        \textbf{3} & \texttt{my whole body feels itchy and like its on fire} & \texttt{my whole body feels itchy and like its on fire} & 0 \\ \hline
+        \textbf{4} & \texttt{@nationwideclass no, it's not behaving at all. i'm mad. why am i here? because I can't see you all over there.} & \texttt{no its not behaving at all im mad why am i here because i cant see you all over there} & 0 \\ \hline
+    \end{tabular}
+    \caption{Sanitization results on sample records from the dataset.}
+\end{table}
+
+\subsection{Stopwords Elimination with Negation Preservation}
+Stopwords are high-frequency grammatical functional words (e.g., \texttt{the}, \texttt{is}, \texttt{at}, \texttt{which}) that typically carry minimal topic information. However, standard stopword lists contain negation adverbs and contractions (\texttt{not}, \texttt{no}, \texttt{nor}, \texttt{neither}, \texttt{never}, \texttt{cannot}, \texttt{cant}, \texttt{wont}, \texttt{isnt}, \texttt{arent}). 
+
+In sentiment classification, discarding negations produces catastrophic semantic errors:
+\begin{equation*}
+\text{"The update is not good"} \xrightarrow{\text{standard stopword drop}} \text{"update good"} \quad (\text{Polarity Inverted!})
+\end{equation*}
+
+To resolve this, an essential set of negation tokens was preserved:
+\begin{equation}
+\mathcal{S}_{\text{custom}} = \mathcal{S}_{\text{standard}} \setminus \{\text{'not', 'no', 'nor', 'neither', 'never', 'none', 'cannot', 'cant', 'wont', 'isnt', 'arent'}\}
+\end{equation}
+
+\begin{table}[h!]
+    \centering
+    \small
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|c|p{7.5cm}|p{7.5cm}|}
+        \hline
+        \textbf{Id} & \textbf{Sanitized Text (\texttt{clean\_text})} & \textbf{After Stopwords Removal (\texttt{text\_no\_stopwords})} \\ \hline
+        \textbf{0} & \texttt{awww thats a bummer you shoulda got david carr of third day to do it d} & \texttt{awww thats bummer shoulda got david carr day d} \\ \hline
+        \textbf{1} & \texttt{is upset that he cant update his facebook by texting it and might cry as a result school today also blah} & \texttt{upset cant update facebook texting result school today blah} \\ \hline
+        \textbf{2} & \texttt{i dived many times for the ball managed to save the rest go out of bounds} & \texttt{dived times ball managed save rest bounds} \\ \hline
+        \textbf{3} & \texttt{my whole body feels itchy and like its on fire} & \texttt{body feels itchy like} \\ \hline
+        \textbf{4} & \texttt{no its not behaving at all im mad why am i here because i cant see you all over there} & \texttt{no not behaving im mad cant} \\ \hline
+    \end{tabular}
+    \caption{Stopword filtering verification with negation retention.}
+\end{table}
+
+Notice in row 4 that \texttt{no}, \texttt{not}, and \texttt{cant} are strictly retained, preserving the critical negative sentiment indicators.
+
+\subsection{Morphological Suffix Stemming}
+To normalize word inflections to common morphological bases, a rule-based suffix stemming function was constructed in pure Python. This eliminates external runtime dependencies and executes reliably offline. 
+
+The algorithm strips inflectional affixes including \texttt{-ing}, \texttt{-edly}, \texttt{-fully}, \texttt{-ed}, \texttt{-ly}, \texttt{-es}, and \texttt{-s} subject to minimum stem length constraints:
+\begin{equation}
+\text{stem}(w) = \begin{cases} w_{0:|w|-|s|} & \text{if } w \text{ ends with suffix } s \text{ and } |w| > |s| + 2 \\ w & \text{otherwise} \end{cases}
+\end{equation}
+
+\begin{table}[h!]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|l|l|}
+        \hline
+        \textbf{Input Inflection} & \textbf{Extracted Stem} & \textbf{Target Base Meaning} \\ \hline
+        \texttt{loving} & \texttt{lov} & Base emotion stem \\ \hline
+        \texttt{loved} & \texttt{lov} & Base emotion stem \\ \hline
+        \texttt{lovely} & \texttt{love} & Base attribute stem \\ \hline
+        \texttt{playing} & \texttt{play} & Root verb \\ \hline
+        \texttt{crying} & \texttt{cry} & Negative distress verb \\ \hline
+        \texttt{happiness} & \texttt{happines} & Positive attribute root \\ \hline
+    \end{tabular}
+    \caption{Morphological suffix reduction validation.}
+\end{table}
+
+% -------------------------------------------------------------
+% SECTION 6: TF-IDF
+% -------------------------------------------------------------
+\section{Feature Extraction: Term Frequency--Inverse Document Frequency (TF-IDF)}
+
+Machine learning algorithms require numerical feature spaces. We employ \textbf{TF-IDF vectorization}, which balances term frequency within a document against its document frequency across the entire corpus.
+
+\subsection{Mathematical Formulation}
+For a term $t$ in a tweet $d$ within a corpus of size $|D| = 1,280,000$:
+
+\begin{enumerate}
+    \item \textbf{Term Frequency (TF):}
+    \begin{equation}
+    \text{TF}(t, d) = \frac{f_{t,d}}{\sum_{t' \in d} f_{t',d}}
+    \end{equation}
+    where $f_{t,d}$ is the raw count of term $t$ in tweet $d$.
+    
+    \item \textbf{Inverse Document Frequency (IDF):}
+    \begin{equation}
+    \text{IDF}(t, D) = \log\left(\frac{1 + |D|}{1 + |\{d \in D : t \in d\}|}\right) + 1
+    \end{equation}
+    This assigns lower weight to ubiquitous words and higher weight to informative, distinctive terms.
+    
+    \item \textbf{Composite TF-IDF Score:}
+    \begin{equation}
+    \text{TF-IDF}(t, d, D) = \text{TF}(t, d) \times \text{IDF}(t, D)
+    \end{equation}
+    Each document vector is subsequently normalized using Euclidean $L_2$ norm:
+    \begin{equation}
+    \mathbf{v}_{\text{norm}} = \frac{\mathbf{v}}{\|\mathbf{v}\|_2}
+    \end{equation}
+\end{enumerate}
+
+\subsection{Vectorizer Hyperparameters}
+\begin{itemize}
+    \item \textbf{Vocabulary Constraint (\texttt{max\_features = 25000}):} Retains the top 25,000 most informative n-grams across the training set, constraining memory consumption while maintaining representational expressiveness.
+    \item \textbf{N-Gram Range (\texttt{ngram\_range = (1, 2)}):} Extracts both unigrams (\texttt{good}, \texttt{bad}) and contiguous bigrams (\texttt{not good}, \texttt{cant update}, \texttt{really love}). Incorporating bigrams enables the linear model to capture localized negation phrases without requiring sequence-based recurrent architectures.
+\end{itemize}
+
+% -------------------------------------------------------------
+% SECTION 7: METHODOLOGY RATIONALE
+% -------------------------------------------------------------
+\section{Methodological Selection: Classical Machine Learning vs. Deep Learning}
+
+In natural language processing research, architectures broadly split into:
+\begin{enumerate}
+    \item \textbf{Classical Machine Learning:} Frequency-based sparse matrix representations (TF-IDF) paired with convex linear or kernelized classifiers (Logistic Regression, Linear Support Vector Machines, Naive Bayes).
+    \item \textbf{Deep Learning:} Dense distributed embeddings (Word2Vec, GloVe) feeding sequential or self-attention networks (LSTM, GRU, Transformers like BERT/RoBERTa).
+\end{enumerate}
+
+\subsection{Rationale for Selecting Classical Machine Learning}
+While deep recurrent models (such as LSTMs) can model sequential token interactions, \textbf{Classical Machine Learning (TF-IDF + Logistic Regression) was intentionally selected as our primary methodology} for three academic reasons:
+
+\begin{enumerate}
+    \item \textbf{Rigorous Application of Foundational Course Concepts:}
+    Deep learning models often treat raw text as an end-to-end token sequence, delegating subword parsing and syntax extraction to black-box neural layers. Choosing the classical approach allowed us to directly implement, inspect, verify, and document each foundational data preprocessing stage studied throughout the course:
+    \begin{itemize}
+        \item Designing custom regular expression filters.
+        \item Performing empirical noise audits across 1.6 million entries.
+        \item Implementing stopword pruning while preserving critical negation semantics.
+        \item Engineering morphological rule-based stemmers.
+        \item Constructing sparse vector spaces with unigrams and bigrams.
+    \end{itemize}
+    
+    \item \textbf{Computational and Memory Efficiency:}
+    On a corpus of 1.6 million instances, training deep recurrent networks on CPU infrastructure requires hours of compute and carries memory allocation constraints (e.g., allocating gigabyte-scale contiguous tensors for evaluation). By contrast, TF-IDF coupled with Logistic Regression converges in \textbf{under 4 seconds} on the entire corpus while maintaining high discriminative performance.
+    
+    \item \textbf{Interpretability:}
+    Linear models yield direct feature coefficients $w_j \in \mathbb{R}$. A positive coefficient directly signifies positive sentiment contribution (e.g., words like \texttt{love}, \texttt{awesome}, \texttt{thanks}), whereas negative coefficients directly indicate negative polarity (e.g., \texttt{hate}, \texttt{sad}, \texttt{worst}), providing transparent explainability.
+\end{enumerate}
+
+% -------------------------------------------------------------
+% SECTION 8: EXPERIMENTS & RESULTS
+% -------------------------------------------------------------
+\section{Experimental Setup, Training \& Evaluation}
+
+\subsection{Dataset Partitioning \& Class Parity}
+The preprocessed dataset of 1,600,000 tweets was split into training and evaluation sets using stratified sampling (\texttt{random\_state = 42}, \texttt{test\_size = 0.20}):
+
+\begin{table}[h!]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|c|r|c|c|}
+        \hline
+        \textbf{Partition} & \textbf{Proportion} & \textbf{Total Instances} & \textbf{Negative Class ($0$)} & \textbf{Positive Class ($1$)} \\ \hline
+        \textbf{Training Set} & 80.0\% & \textbf{1,280,000} & 640,000 & 640,000 \\ \hline
+        \textbf{Holdout Test Set} & 20.0\% & \textbf{320,000} & 160,000 & 160,000 \\ \hline
+        \textbf{Full Corpus} & 100.0\% & \textbf{1,600,000} & 800,000 & 800,000 \\ \hline
+    \end{tabular}
+    \caption{Class-balanced dataset partitioning scheme.}
+\end{table}
+
+Stratification ensures zero distribution skew between development and evaluation environments.
+
+\subsection{Model Training \& Computational Efficiency}
+The classifier was trained using $L_2$-regularized Logistic Regression optimized via the Limited-memory Broyden--Fletcher--Goldfarb--Shanno (\textbf{L-BFGS}) algorithm:
+\begin{equation}
+\min_{\mathbf{w}, b} \frac{1}{N} \sum_{i=1}^{N} \log\left(1 + \exp\left(-y_i (\mathbf{w}^T \mathbf{x}_i + b)\right)\right) + \frac{1}{2C} \|\mathbf{w}\|_2^2
+\end{equation}
+
+\begin{itemize}
+    \item \textbf{Regularization Strength:} Inverse penalty parameter $C = 1.0$.
+    \item \textbf{Convergence Limit:} \texttt{max\_iter = 1000}.
+    \item \textbf{Observed Training Wall-Clock Time:} \textbf{3.63 seconds} across \textbf{1,280,000 training records}.
+\end{itemize}
+
+This training velocity emphasizes the scalability of sparse linear models over massive web corpora.
+
+\subsection{Detailed Performance Metrics \& Classification Report}
+The model was evaluated on the \textbf{320,000 unseen test samples}. Performance was quantified through Accuracy, Precision, Recall, and the harmonic F1-Score:
+\begin{equation}
+\text{Accuracy} = \frac{\text{TP} + \text{TN}}{\text{TP} + \text{TN} + \text{FP} + \text{FN}} = \mathbf{79.45\%}
+\end{equation}
+
+\begin{table}[h!]
+    \centering
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{|l|c|c|c|r|}
+        \hline
+        \textbf{Sentiment Class} & \textbf{Precision} & \textbf{Recall} & \textbf{F1-Score} & \textbf{Support} \\ \hline
+        \textbf{Negative Polarity ($0$)} & \textbf{0.81} & \textbf{0.77} & \textbf{0.79} & 160,000 \\ \hline
+        \textbf{Positive Polarity ($1$)} & \textbf{0.78} & \textbf{0.82} & \textbf{0.80} & 160,000 \\ \hline
+        \hline
+        \textbf{Overall Accuracy} & --- & --- & \textbf{0.79} & 320,000 \\ \hline
+        \textbf{Macro Average} & 0.80 & 0.79 & 0.79 & 320,000 \\ \hline
+        \textbf{Weighted Average} & 0.80 & 0.79 & 0.79 & 320,000 \\ \hline
+    \end{tabular}
+    \caption{Holdout test set classification report on 320,000 unseen tweets.}
+\end{table}
+
+\subsubsection{Analytical Insights}
+\begin{enumerate}
+    \item \textbf{Symmetric Class Recognition:} The model achieves balanced F1-scores of \textbf{0.79} for negative sentiment and \textbf{0.80} for positive sentiment.
+    \item \textbf{Precision vs. Recall Dynamic:}
+    \begin{itemize}
+        \item For the Negative class, \textbf{Precision is 0.81}, indicating that when the model flags a tweet as negative, it is correct in 81\% of instances.
+        \item For the Positive class, \textbf{Recall is 0.82}, demonstrating that the model successfully retrieves 82\% of all true positive tweets in the holdout test set.
+    \end{itemize}
+\end{enumerate}
+
+% -------------------------------------------------------------
+% SECTION 9: INTERACTIVE INFERENCE
+% -------------------------------------------------------------
+\section{Interactive Sentiment Inference Pipeline}
+
+To validate real-time operational deployment, an interactive inference function was constructed. The pipeline takes raw user-provided input, applies the sanitization, stopword filtration, and stemming transforms, and scores it through the learned TF-IDF space and classifier.
+
+\subsection{Live Test Case Execution}
+\begin{itemize}
+    \item \textbf{Input Text:} \texttt{"I absolutely love this new update! Everything is working smoothly."}
+    \item \textbf{Transformation Trace:}
+    \begin{enumerate}
+        \item \textit{Sanitization:} \texttt{i absolutely love this new update everything is working smoothly}
+        \item \textit{Stopwords Pruning:} \texttt{absolutely love update working smoothly}
+        \item \textit{Suffix Stemming:} \texttt{absolut lov updat work smoothli}
+    \end{enumerate}
+    \item \textbf{Model Output:}
+    \begin{itemize}
+        \item \textbf{Predicted Polarity:} \textbf{\texttt{Positive (1) :)}}
+        \item \textbf{Posterior Probability Confidence:} \textbf{\texttt{96.18\%}}
+    \end{itemize}
+\end{itemize}
+
+This confirms that the learned vocabulary weights generalize effectively to natural user queries.
+
+% -------------------------------------------------------------
+% SECTION 10: CONCLUSION
+% -------------------------------------------------------------
+\section{Conclusion \& Key Takeaways}
+
+\begin{enumerate}
+    \item \textbf{Data Preprocessing is Decisive:} 
+    Our noise audit confirmed that over \textbf{90\%} of raw microblog data contains punctuation noise and \textbf{46\%} contains user mentions. Cleaning these elements while deliberately protecting negation particles (\texttt{not}, \texttt{no}, \texttt{cant}) is crucial for maintaining semantic integrity.
+    
+    \item \textbf{Computational Superiority of Classical ML:} 
+    By utilizing $n$-gram TF-IDF representations ($n \in \{1, 2\}$) and Logistic Regression, the model was trained across \textbf{1.28 million records in 3.63 seconds}, delivering an \textbf{accuracy of 79.45\%} on 320,000 holdout records.
+    
+    \item \textbf{Course Learning Objectives Realized:} 
+    Rather than abstracting the pipeline into an opaque deep neural architecture, the classical machine learning workflow enabled full end-to-end implementation and validation of every core preprocessing component taught in the course.
+\end{enumerate}
+
+% -------------------------------------------------------------
+% SECTION 11: REFERENCES
+% -------------------------------------------------------------
+\section{References}
+
+\begin{enumerate}
+    \item \textbf{Dataset Source:} \\
+    Kazanova. \textit{Sentiment140 Dataset with 1.6 Million Tweets}. Kaggle Datasets. \\
+    Available online: \url{https://www.kaggle.com/datasets/kazanova/sentiment140}
+\end{enumerate}
+
+\end{document}
+
